@@ -21,7 +21,7 @@ Objetivos principais:
 
 ## 🏗️ Arquitetura
 
-![Arquitetura](assets/architecture.png)
+![Arquitetura](Diagrama-arquitetura.png)
 
 ---
 
