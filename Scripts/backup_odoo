@@ -1,0 +1,31 @@
+#!/bin/bash
+set -euo pipefail
+
+# ===== CONFIG =====
+DB_NAME="odoo"
+CONTAINER="postgres"
+BACKUP_DIR="/opt/erp-spark/backup/data"
+DATE=$(date +%F_%H-%M-%S)
+FILE="$BACKUP_DIR/db_$DATE.sql.gz"
+LOG="$BACKUP_DIR/backup.log"
+
+# ===== EXEC =====
+mkdir -p "$BACKUP_DIR"
+
+echo "[$(date)] Iniciando backup..." >> "$LOG"
+
+if docker exec "$CONTAINER" pg_dump -U odoo -d "$DB_NAME" | gzip > "$FILE"; then
+    echo "[$(date)] Backup concluído: $FILE" >> "$LOG"
+else
+    echo "[$(date)] ERRO: Falha no pg_dump" >> "$LOG"
+    exit 1
+fi
+
+# ===== VALIDAÇÃO =====
+if [ ! -s "$FILE" ]; then
+    echo "[$(date)] ERRO: Backup vazio" >> "$LOG"
+    exit 1
+fi
+
+# ===== RETENÇÃO =====
+find "$BACKUP_DIR" -type f -name "*.sql.gz" -mtime +7 -delete
