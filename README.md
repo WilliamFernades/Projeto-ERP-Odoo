@@ -13,7 +13,7 @@ A arquitetura é composta por três servidores:
 Objetivos principais:
 
 * Visibilidade completa do ambiente (métricas e logs)
-* Monitoramento ativo (health checks)
+* Monitoramento ativo
 * Backup automatizado com validação
 * Recuperação confiável
 
