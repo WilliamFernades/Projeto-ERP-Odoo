@@ -1,0 +1,65 @@
+#!/bin/bash
+# ==============================================================================
+# Script de Backup Odoo -> Proxmox Backup Server
+# ==============================================================================
+
+source /root/.pbs-env
+
+# Configurações do Ambiente
+BACKUP_DIR="/opt/erp-spark/backup/data"
+DB_CONTAINER="postgres"      # Nome do container do banco
+DB_USER="xxx"
+DB_NAME="xxxx"
+ODOO_CONTAINER="odoo"        # <-- ATENÇÃO: Nome do container da aplicação Odoo
+METRICS_FILE="/var/lib/prometheus/node-exporter/pbs_backup.prom"
+START_TIME=$(date +%s)
+
+mkdir -p $BACKUP_DIR
+mkdir -p /var/lib/prometheus/node-exporter/
+
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Iniciando rotina de backup..."
+
+# 1. Descobrir o caminho real do Filestore no Host dinamicamente
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Localizando volume do Odoo..."
+ODOO_VOLUME_PATH=$(docker inspect -f '{{ range .Mounts }}{{ if eq .Destination "/var/lib/odoo" }}{{ .Source }}{{ end }}{{ end }}' $ODOO_CONTAINER)
+
+if [ -z "$ODOO_VOLUME_PATH" ]; then
+    echo "[ERRO] Não foi possível localizar o volume do Odoo!"
+    exit 1
+fi
+echo "Volume encontrado em: $ODOO_VOLUME_PATH"
+
+# 2. Dump do Banco de Dados
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Gerando dump do PostgreSQL..."
+docker exec $DB_CONTAINER pg_dump -U $DB_USER -F c -f /tmp/db_dump.custom $DB_NAME
+if [ $? -ne 0 ]; then
+    echo "pbs_backup_success 0" > $METRICS_FILE
+    echo "[ERRO] Falha ao gerar dump do banco!"
+    exit 1
+fi
+
+docker cp $DB_CONTAINER:/tmp/db_dump.custom $BACKUP_DIR/db_dump.custom
+docker exec $DB_CONTAINER rm /tmp/db_dump.custom
+
+# 3. Envio para o Proxmox Backup Server
+echo "[$(date +'%Y-%m-%d %H:%M:%S')] Enviando dados para o PBS..."
+proxmox-backup-client backup \
+    db.pxar:$BACKUP_DIR \
+    filestore.pxar:$ODOO_VOLUME_PATH/filestore \
+    config.pxar:/opt/erp-spark \
+    --backup-id odoo-prod-server
+
+if [ $? -eq 0 ]; then
+    END_TIME=$(date +%s)
+    DURATION=$((END_TIME - START_TIME))
+
+    echo "pbs_backup_success 1" > $METRICS_FILE
+    echo "pbs_backup_duration_seconds $DURATION" >> $METRICS_FILE
+    echo "pbs_backup_last_run_timestamp_seconds $END_TIME" >> $METRICS_FILE
+
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] Backup concluído com sucesso em ${DURATION}s."
+else
+    echo "pbs_backup_success 0" > $METRICS_FILE
+    echo "[ERRO] Falha ao enviar backup para o PBS!"
+    exit 1
+fi
